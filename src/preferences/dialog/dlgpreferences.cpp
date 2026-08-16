@@ -204,7 +204,7 @@ DlgPreferences::DlgPreferences(
             "ic_preferences_effects.svg");
 
     addPageWidget(PreferencesPage(
-                          new DlgPrefAutoDJ(this, m_pConfig),
+                          new DlgPrefAutoDJ(this, m_pConfig, pLibrary),
                           new QTreeWidgetItem(contentsTreeWidget, QTreeWidgetItem::Type)),
             tr("Auto DJ"),
             "ic_preferences_autodj.svg");
