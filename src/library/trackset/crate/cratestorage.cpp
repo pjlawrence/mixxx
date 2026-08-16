@@ -72,6 +72,9 @@ class CrateQueryBinder final {
     void bindAutoDjSource(const QString& placeholder, const Crate& crate) const {
         m_query.bindValue(placeholder, QVariant(crate.isAutoDjSource()));
     }
+    void bindAutoDjWeight(const QString& placeholder, const Crate& crate) const {
+        m_query.bindValue(placeholder, crate.autoDjWeight());
+    }
 
   protected:
     FwdSqlQuery& m_query;
@@ -103,7 +106,8 @@ CrateQueryFields::CrateQueryFields(const FwdSqlQuery& query)
         : m_iId(query.fieldIndex(CRATETABLE_ID)),
           m_iName(query.fieldIndex(CRATETABLE_NAME)),
           m_iLocked(query.fieldIndex(CRATETABLE_LOCKED)),
-          m_iAutoDjSource(query.fieldIndex(CRATETABLE_AUTODJ_SOURCE)) {
+          m_iAutoDjSource(query.fieldIndex(CRATETABLE_AUTODJ_SOURCE)),
+          m_iAutoDjWeight(query.fieldIndex(CRATETABLE_AUTODJ_WEIGHT)) {
 }
 
 void CrateQueryFields::populateFromQuery(
@@ -113,6 +117,7 @@ void CrateQueryFields::populateFromQuery(
     pCrate->setName(getName(query));
     pCrate->setLocked(isLocked(query));
     pCrate->setAutoDjSource(isAutoDjSource(query));
+    pCrate->setAutoDjWeight(autoDjWeight(query));
 }
 
 CrateTrackQueryFields::CrateTrackQueryFields(const FwdSqlQuery& query)
@@ -570,13 +575,14 @@ bool CrateStorage::onInsertingCrate(
     }
     FwdSqlQuery query(m_database,
             QStringLiteral(
-                    "INSERT INTO %1 (%2,%3,%4) "
-                    "VALUES (:name,:locked,:autoDjSource)")
+                    "INSERT INTO %1 (%2,%3,%4,%5) "
+                    "VALUES (:name,:locked,:autoDjSource,:autoDjWeight)")
                     .arg(
                             CRATE_TABLE,
                             CRATETABLE_NAME,
                             CRATETABLE_LOCKED,
-                            CRATETABLE_AUTODJ_SOURCE));
+                            CRATETABLE_AUTODJ_SOURCE,
+                            CRATETABLE_AUTODJ_WEIGHT));
     VERIFY_OR_DEBUG_ASSERT(query.isPrepared()) {
         return false;
     }
@@ -584,6 +590,7 @@ bool CrateStorage::onInsertingCrate(
     queryBinder.bindName(":name", crate);
     queryBinder.bindLocked(":locked", crate);
     queryBinder.bindAutoDjSource(":autoDjSource", crate);
+    queryBinder.bindAutoDjWeight(":autoDjWeight", crate);
     VERIFY_OR_DEBUG_ASSERT(query.execPrepared()) {
         return false;
     }
@@ -609,13 +616,14 @@ bool CrateStorage::onUpdatingCrate(
     FwdSqlQuery query(m_database,
             QString(
                     "UPDATE %1 "
-                    "SET %2=:name,%3=:locked,%4=:autoDjSource "
-                    "WHERE %5=:id")
+                    "SET %2=:name,%3=:locked,%4=:autoDjSource,%5=:autoDjWeight "
+                    "WHERE %6=:id")
                     .arg(
                             CRATE_TABLE,
                             CRATETABLE_NAME,
                             CRATETABLE_LOCKED,
                             CRATETABLE_AUTODJ_SOURCE,
+                            CRATETABLE_AUTODJ_WEIGHT,
                             CRATETABLE_ID));
     VERIFY_OR_DEBUG_ASSERT(query.isPrepared()) {
         return false;
@@ -625,6 +633,7 @@ bool CrateStorage::onUpdatingCrate(
     queryBinder.bindName(":name", crate);
     queryBinder.bindLocked(":locked", crate);
     queryBinder.bindAutoDjSource(":autoDjSource", crate);
+    queryBinder.bindAutoDjWeight(":autoDjWeight", crate);
     VERIFY_OR_DEBUG_ASSERT(query.execPrepared()) {
         return false;
     }

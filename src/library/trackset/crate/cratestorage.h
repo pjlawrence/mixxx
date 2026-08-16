@@ -31,6 +31,9 @@ class CrateQueryFields {
     bool isAutoDjSource(const FwdSqlQuery& query) const {
         return query.fieldValueBoolean(m_iAutoDjSource);
     }
+    int autoDjWeight(const FwdSqlQuery& query) const {
+        return query.fieldValue(m_iAutoDjWeight).toInt();
+    }
 
     void populateFromQuery(
             const FwdSqlQuery& query,
@@ -41,6 +44,7 @@ class CrateQueryFields {
     DbFieldIndex m_iName;
     DbFieldIndex m_iLocked;
     DbFieldIndex m_iAutoDjSource;
+    DbFieldIndex m_iAutoDjWeight;
 };
 
 class CrateSelectResult : public FwdSqlQuerySelectResult {

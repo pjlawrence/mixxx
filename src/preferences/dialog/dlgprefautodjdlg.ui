@@ -324,6 +324,47 @@
    </item>
 
    <item>
+    <widget class="QGroupBox" name="groupBoxCrateWeights">
+      <property name="title">
+       <string>Crate Weights</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayoutCrateWeights">
+       <item>
+        <widget class="QLabel" name="labelNoCrates">
+         <property name="text">
+          <string>No Auto DJ source crates configured.</string>
+         </property>
+         <property name="visible">
+          <bool>false</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QScrollArea" name="scrollAreaWeights">
+         <property name="widgetResizable">
+          <bool>true</bool>
+         </property>
+         <widget class="QWidget" name="scrollAreaWidgetContents">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>0</y>
+            <width>0</width>
+            <height>0</height>
+           </rect>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayoutWeights"/>
+         </widget>
+        </widget>
+       </item>
+      </layout>
+    </widget>
+   </item>
+
+   <item>
     <spacer name="verticalSpacer">
      <property name="orientation">
       <enum>Qt::Vertical</enum>

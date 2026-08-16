@@ -17,6 +17,7 @@ const QString CRATETABLE_NAME = QStringLiteral("name");
 // ideas of the new design should be documented for verification
 // before starting to code.
 const QString CRATETABLE_AUTODJ_SOURCE = QStringLiteral("autodj_source");
+const QString CRATETABLE_AUTODJ_WEIGHT = QStringLiteral("autodj_weight");
 
 const QString CRATETRACKSTABLE_CRATEID = QStringLiteral("crate_id");
 const QString CRATETRACKSTABLE_TRACKID = QStringLiteral("track_id");
