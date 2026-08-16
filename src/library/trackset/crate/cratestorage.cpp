@@ -73,7 +73,7 @@ class CrateQueryBinder final {
         m_query.bindValue(placeholder, QVariant(crate.isAutoDjSource()));
     }
     void bindAutoDjWeight(const QString& placeholder, const Crate& crate) const {
-        m_query.bindValue(placeholder, crate.autoDjWeight());
+        m_query.bindValue(placeholder, QVariant(crate.autoDjWeight()));
     }
 
   protected:
