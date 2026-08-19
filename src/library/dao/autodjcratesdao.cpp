@@ -544,124 +544,139 @@ bool AutoDJCratesDAO::updateLastPlayedDateTimeForTrack(TrackId trackId) {
 }
 
 // Get the ID, i.e. one that references library.id, of a random track.
-// Returns an invalid track id if there was an error.
+// Uses a two-stage weighted selection algorithm:
+//   1. Select a crate based on normalized weights (or active-track count
+//      for equal-weight backward compatibility)
+//   2. Select a random track uniformly from the chosen crate's active tracks
+// Returns an invalid track id if there was an error or no tracks are available.
 TrackId AutoDJCratesDAO::getRandomTrackId() {
     // If necessary, create the temporary auto-DJ-crates database.
     createAndConnectAutoDjCratesDatabase();
 
-    // Calculate the number of active-tracks that have never been played, and
-    // the total number of active-tracks.
+    // Stage 1: Query all Auto DJ source crates with their weights from the
+    // persistent crates table. m_database references the main database which
+    // contains both the persistent crates table and the temp tables.
     QSqlQuery oQuery(m_database);
-    // SELECT COUNT(*) AS count
-    // FROM temp_autodj_activetracks
-    // WHERE timesplayed = 0
-    // UNION ALL SELECT COUNT(*) AS count
-    // FROM temp_autodj_activetracks;
-    oQuery.prepare("SELECT COUNT(*) AS count FROM " AUTODJACTIVETRACKS_TABLE
-        " WHERE " AUTODJCRATESTABLE_TIMESPLAYED
-        " = 0 UNION ALL SELECT COUNT(*) AS count FROM "
-        AUTODJACTIVETRACKS_TABLE);
+    oQuery.prepare(QString(
+            "SELECT %1, %2 FROM " CRATE_TABLE " WHERE %3 = 1")
+                           .arg(CRATETABLE_ID,              // %1
+                                   CRATETABLE_AUTODJ_WEIGHT, // %2
+                                   CRATETABLE_AUTODJ_SOURCE)); // %3
     if (!oQuery.exec()) {
         LOG_FAILED_QUERY(oQuery);
-        DEBUG_ASSERT(!"failed query");
         return TrackId();
     }
-    int iUnplayedTracks = 0;
-    int iTotalTracks = 0;
-    if (oQuery.next()) {
-        iUnplayedTracks = oQuery.value(0).toInt();
-        if (oQuery.next()) {
-            iTotalTracks = oQuery.value(0).toInt();
-        }
+
+    // Build the candidates vector: (CrateId, weight) pairs.
+    QVector<QPair<CrateId, int>> candidates;
+    while (oQuery.next()) {
+        CrateId crateId(oQuery.value(0));
+        int weight = oQuery.value(1).toInt();
+        candidates.append(qMakePair(crateId, weight));
     }
 
-    // Get the active percentage (default 20%).
+    // If no source crates exist, return invalid TrackId immediately.
+    if (candidates.isEmpty()) {
+        qDebug() << "No Auto DJ source crates configured";
+        return TrackId();
+    }
+
+    // Get the minimum available percentage for the fallback path.
     int minimumAvailablePercentage = m_pConfig->getValue(
             ConfigKey("[Auto DJ]", "MinimumAvailable"), 20);
 
-    // If there are no tracks available not already in AutoDJ
-    // start re-adding tracks to AutoDJ
-    if (iTotalTracks == 0) {
-        return getRandomTrackIdFromAutoDj(minimumAvailablePercentage);
+    // Check if all weights are equal (for backward compatibility).
+    // When all weights are equal, selection probability should be proportional
+    // to active-track count, reproducing the original flat-pool behavior.
+    bool allWeightsEqual = true;
+    int firstWeight = candidates.first().second;
+    for (int i = 1; i < candidates.size(); ++i) {
+        if (candidates[i].second != firstWeight) {
+            allWeightsEqual = false;
+            break;
+        }
     }
 
-    // Calculate the number of active-tracks.  This is either the number of
-    // auto-DJ-crate tracks that have never been played, or the active
-    // percentage of the total number of tracks, whichever is larger.
-    int iMinAvailable = 0;
-    if (minimumAvailablePercentage) {
-        // if minimumAvailablePercentage not 0 % (disabled),
-        // have a minimum of one at least
-        iMinAvailable = qMax((iTotalTracks * minimumAvailablePercentage / 100), 1);
-    }
-    int iActiveTracks = qMax(iUnplayedTracks, iMinAvailable);
+    // Stage 2: Selection loop — pick a crate, check for active tracks,
+    // retry if exhausted.
+    while (!candidates.isEmpty()) {
+        CrateId selectedCrate;
 
-    // The number of active-tracks might also be tracks that haven't been played
-    // in a while.
-    if (m_bUseIgnoreTime) {
-        // Get the current time, in UTC (since that's what sqlite uses).
-        QDateTime timeCurrent = QDateTime::currentDateTimeUtc();
+        if (allWeightsEqual) {
+            // Backward compatibility: select crate proportional to active-track
+            // count. Build a weight vector where each crate's "weight" is its
+            // active-track count, then use selectCrateByWeight().
+            QVector<QPair<CrateId, int>> activeCountCandidates;
+            for (const auto& candidate : candidates) {
+                int activeCount = countActiveTracksForCrate(candidate.first);
+                if (activeCount > 0) {
+                    activeCountCandidates.append(
+                            qMakePair(candidate.first, activeCount));
+                }
+            }
 
-        // Subtract the replay age.
-        QTime timIgnoreTime = (QTime::fromString(m_pConfig->getValue(
-                ConfigKey("[Auto DJ]", "IgnoreTime"), "23:59"), "hh:mm"));
-        timeCurrent = timeCurrent.addSecs(-(timIgnoreTime.hour() * 3600
-            + timIgnoreTime.minute() * 60));
+            if (activeCountCandidates.isEmpty()) {
+                // All crates exhausted — fall back to re-queue behavior.
+                break;
+            }
 
-        // Convert the time to sqlite's format, which is similar to ISO date,
-        // but not quite.
-        QString strDateTime = timeCurrent.toString("yyyy-MM-dd hh:mm:ss");
+            selectedCrate = selectCrateByWeight(activeCountCandidates);
 
-        // Count the number of tracks that haven't been played since this time.
-        // Include tracks that have never been played (NULL or empty lastplayed).
-        // SELECT COUNT(*) FROM temp_autodj_activetracks
-        //   WHERE lastplayed IS NULL OR lastplayed = '' OR lastplayed < :lastplayed;
-        int iIgnoreTimeTracks = 0;
-        oQuery.prepare("SELECT COUNT(*) FROM " AUTODJACTIVETRACKS_TABLE
-            " WHERE " AUTODJCRATESTABLE_LASTPLAYED " IS NULL"
-            " OR " AUTODJCRATESTABLE_LASTPLAYED " = ''"
-            " OR " AUTODJCRATESTABLE_LASTPLAYED " < :lastplayed");
-        oQuery.bindValue (":lastplayed", strDateTime);
-        if (oQuery.exec()) {
-            if (oQuery.next()) {
-                iIgnoreTimeTracks = oQuery.value(0).toInt();
+            // Get the active count for the selected crate (already computed).
+            int activeCount = 0;
+            for (const auto& ac : activeCountCandidates) {
+                if (ac.first == selectedCrate) {
+                    activeCount = ac.second;
+                    break;
+                }
+            }
+
+            TrackId trackId = getRandomTrackFromCrate(selectedCrate, activeCount);
+            if (trackId.isValid()) {
+                return trackId;
+            }
+
+            // Should not happen since we already filtered empty crates,
+            // but remove and retry if it does.
+            for (int i = 0; i < candidates.size(); ++i) {
+                if (candidates[i].first == selectedCrate) {
+                    candidates.removeAt(i);
+                    break;
+                }
             }
         } else {
-            LOG_FAILED_QUERY(oQuery);
-            return TrackId();
+            // Weighted selection: use configured weights directly.
+            selectedCrate = selectCrateByWeight(candidates);
+
+            int activeCount = countActiveTracksForCrate(selectedCrate);
+            if (activeCount == 0) {
+                // Remove exhausted crate from candidates and retry.
+                for (int i = 0; i < candidates.size(); ++i) {
+                    if (candidates[i].first == selectedCrate) {
+                        candidates.removeAt(i);
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            TrackId trackId = getRandomTrackFromCrate(selectedCrate, activeCount);
+            if (trackId.isValid()) {
+                return trackId;
+            }
+
+            // Track selection failed unexpectedly — remove crate and retry.
+            for (int i = 0; i < candidates.size(); ++i) {
+                if (candidates[i].first == selectedCrate) {
+                    candidates.removeAt(i);
+                    break;
+                }
+            }
         }
-
-        // Allow that to be a new maximum.
-        iActiveTracks = qMax(iActiveTracks, iIgnoreTimeTracks);
-
-        qDebug() << iActiveTracks << iIgnoreTimeTracks;
     }
 
-    // If there are no tracks, let our caller know.
-    if (iActiveTracks == 0) {
-        qDebug() << "No random track available for Auto DJ";
-        return TrackId();
-    }
-
-    // Pick a random track.
-    // SELECT track_id
-    // FROM temp_autodj_activetracks LIMIT 1 OFFSET ABS (RANDOM() % :active);
-    oQuery.prepare("SELECT " AUTODJCRATESTABLE_TRACKID " FROM "
-        AUTODJACTIVETRACKS_TABLE " LIMIT 1 OFFSET ABS (RANDOM() % :active)");
-    oQuery.bindValue (":active", iActiveTracks);
-    if (!oQuery.exec()) {
-        LOG_FAILED_QUERY(oQuery);
-        DEBUG_ASSERT(!"failed query");
-        return TrackId();
-    }
-    if (oQuery.next()) {
-        // Give our caller the randomly-selected track.
-        return TrackId(oQuery.value(0));
-    } else {
-        DEBUG_ASSERT(false); // We should have exit earlier
-        qDebug() << "No random track available for Auto DJ";
-        return TrackId();
-    }
+    // All crates exhausted — fall back to re-queue behavior.
+    return getRandomTrackIdFromAutoDj(minimumAvailablePercentage);
 }
 
 TrackId AutoDJCratesDAO::getRandomTrackIdFromAutoDj(int percentActive) {
@@ -736,6 +751,217 @@ TrackId AutoDJCratesDAO::getRandomTrackIdFromAutoDj(int percentActive) {
 }
 
 
+
+// Select a crate from the candidates using weighted random selection.
+// Each candidate's probability is proportional to its weight.
+CrateId AutoDJCratesDAO::selectCrateByWeight(
+        const QVector<QPair<CrateId, int>>& candidates) {
+    int sum = 0;
+    for (const auto& candidate : candidates) {
+        sum += candidate.second;
+    }
+    VERIFY_OR_DEBUG_ASSERT(sum > 0) {
+        return CrateId();
+    }
+    int threshold = QRandomGenerator::global()->bounded(sum);
+    int accumulated = 0;
+    for (const auto& candidate : candidates) {
+        accumulated += candidate.second;
+        if (accumulated > threshold) {
+            return candidate.first;
+        }
+    }
+    // Should never reach here, but return last candidate as fallback
+    return candidates.last().first;
+}
+
+// Count the number of active (eligible) tracks for a specific crate.
+// Active tracks are those in the temp_autodj_crates table that:
+// - Belong to the given crate (via crate_tracks JOIN)
+// - Have autodjrefs = 0 (not already queued or loaded)
+// - Optionally: haven't been played recently (when UseIgnoreTime is enabled)
+int AutoDJCratesDAO::countActiveTracksForCrate(CrateId crateId) {
+    // Base query: count tracks in temp_autodj_crates that belong to this crate
+    // and are not currently referenced by AutoDJ (autodjrefs = 0).
+    QString strQuery = QString(
+            "SELECT COUNT(*) FROM " AUTODJCRATES_TABLE
+            " INNER JOIN " CRATE_TRACKS_TABLE
+            " ON " AUTODJCRATES_TABLE "." AUTODJCRATESTABLE_TRACKID
+            " = " CRATE_TRACKS_TABLE ".%1"
+            " WHERE " CRATE_TRACKS_TABLE ".%2 = :crate_id"
+            " AND " AUTODJCRATES_TABLE "." AUTODJCRATESTABLE_AUTODJREFS " = 0")
+                               .arg(CRATETRACKSTABLE_TRACKID,  // %1
+                                       CRATETRACKSTABLE_CRATEID); // %2
+
+    if (m_bUseIgnoreTime) {
+        // Get the current time in UTC (matching sqlite's format).
+        QDateTime timeCurrent = QDateTime::currentDateTimeUtc();
+
+        // Subtract the configured ignore time.
+        // Try "hh:mm:ss" first (QTime::toString() default), fall back to "hh:mm"
+        // for backward compatibility with older config values.
+        QString ignoreTimeStr = m_pConfig->getValue(
+                ConfigKey("[Auto DJ]", "IgnoreTime"), "23:59");
+        QTime ignoreTime = QTime::fromString(ignoreTimeStr, "hh:mm:ss");
+        if (!ignoreTime.isValid()) {
+            ignoreTime = QTime::fromString(ignoreTimeStr, "hh:mm");
+        }
+        if (!ignoreTime.isValid()) {
+            ignoreTime = QTime(23, 59); // fallback default
+        }
+        timeCurrent = timeCurrent.addSecs(
+                -(ignoreTime.hour() * 3600 + ignoreTime.minute() * 60));
+
+        // Convert to sqlite's datetime format.
+        QString strDateTime = timeCurrent.toString("yyyy-MM-dd hh:mm:ss");
+
+        // Add lastplayed filter: only count tracks played before the threshold.
+        // Include tracks that have never been played (NULL or empty lastplayed).
+        strQuery += QString(" AND (" AUTODJCRATES_TABLE
+                "." AUTODJCRATESTABLE_LASTPLAYED " IS NULL OR " AUTODJCRATES_TABLE
+                "." AUTODJCRATESTABLE_LASTPLAYED " = '' OR " AUTODJCRATES_TABLE
+                "." AUTODJCRATESTABLE_LASTPLAYED " < :lastplayed)");
+
+        QSqlQuery oQuery(m_database);
+        oQuery.prepare(strQuery);
+        oQuery.bindValue(":crate_id", crateId.toVariant());
+        oQuery.bindValue(":lastplayed", strDateTime);
+        if (!oQuery.exec()) {
+            LOG_FAILED_QUERY(oQuery);
+            return 0;
+        }
+        if (oQuery.next()) {
+            return oQuery.value(0).toInt();
+        }
+        return 0;
+    }
+
+    // No ignore-time filtering: just count tracks with autodjrefs = 0.
+    QSqlQuery oQuery(m_database);
+    oQuery.prepare(strQuery);
+    oQuery.bindValue(":crate_id", crateId.toVariant());
+    if (!oQuery.exec()) {
+        LOG_FAILED_QUERY(oQuery);
+        return 0;
+    }
+    if (oQuery.next()) {
+        return oQuery.value(0).toInt();
+    }
+    return 0;
+}
+
+// Pick a random track from the given crate's active tracks.
+// Uses the same filtering logic as countActiveTracksForCrate (autodjrefs = 0,
+// optional ignore-time), ordered by timesplayed/lastplayed, with the active
+// window determining the OFFSET range.
+TrackId AutoDJCratesDAO::getRandomTrackFromCrate(CrateId crateId, int activeCount) {
+    // Get the total number of tracks in this crate (for active window calc).
+    QSqlQuery oQuery(m_database);
+    oQuery.prepare(QString(
+            "SELECT COUNT(*) FROM " CRATE_TRACKS_TABLE
+            " WHERE %1 = :crate_id")
+                           .arg(CRATETRACKSTABLE_CRATEID));
+    oQuery.bindValue(":crate_id", crateId.toVariant());
+    if (!oQuery.exec()) {
+        LOG_FAILED_QUERY(oQuery);
+        return TrackId();
+    }
+    int crateTrackCount = 0;
+    if (oQuery.next()) {
+        crateTrackCount = oQuery.value(0).toInt();
+    }
+
+    // Get the minimum available percentage (default 20%).
+    int minAvailPercent = m_pConfig->getValue(
+            ConfigKey("[Auto DJ]", "MinimumAvailable"), 20);
+
+    // Calculate the active window: max(activeCount, minAvailPercent * crateTrackCount / 100)
+    int minAvailable = 0;
+    if (minAvailPercent) {
+        minAvailable = qMax(crateTrackCount * minAvailPercent / 100, 1);
+    }
+    int activeWindow = qMax(activeCount, minAvailable);
+
+    // Ensure we have at least one track to select from.
+    if (activeWindow <= 0) {
+        return TrackId();
+    }
+
+    // Pick a random offset within the active window.
+    int randomOffset = QRandomGenerator::global()->bounded(activeWindow);
+
+    // Build the query to select active tracks for this crate, ordered by
+    // timesplayed and lastplayed (same ordering as the active-tracks view),
+    // then apply LIMIT 1 OFFSET to pick the random track.
+    QString strTimesPlayed;
+    if (!m_bUseIgnoreTime) {
+        strTimesPlayed = QStringLiteral(AUTODJCRATESTABLE_TIMESPLAYED ", ");
+    }
+
+    QString strQuery = QString(
+            "SELECT " AUTODJCRATES_TABLE "." AUTODJCRATESTABLE_TRACKID
+            " FROM " AUTODJCRATES_TABLE
+            " INNER JOIN " CRATE_TRACKS_TABLE
+            " ON " AUTODJCRATES_TABLE "." AUTODJCRATESTABLE_TRACKID
+            " = " CRATE_TRACKS_TABLE ".%1"
+            " WHERE " CRATE_TRACKS_TABLE ".%2 = :crate_id"
+            " AND " AUTODJCRATES_TABLE "." AUTODJCRATESTABLE_AUTODJREFS " = 0")
+                               .arg(CRATETRACKSTABLE_TRACKID,  // %1
+                                       CRATETRACKSTABLE_CRATEID); // %2
+
+    if (m_bUseIgnoreTime) {
+        // Get the current time in UTC.
+        QDateTime timeCurrent = QDateTime::currentDateTimeUtc();
+
+        // Subtract the configured ignore time.
+        // Try "hh:mm:ss" first (QTime::toString() default), fall back to "hh:mm"
+        // for backward compatibility with older config values.
+        QString ignoreTimeStr = m_pConfig->getValue(
+                ConfigKey("[Auto DJ]", "IgnoreTime"), "23:59");
+        QTime ignoreTime = QTime::fromString(ignoreTimeStr, "hh:mm:ss");
+        if (!ignoreTime.isValid()) {
+            ignoreTime = QTime::fromString(ignoreTimeStr, "hh:mm");
+        }
+        if (!ignoreTime.isValid()) {
+            ignoreTime = QTime(23, 59); // fallback default
+        }
+        timeCurrent = timeCurrent.addSecs(
+                -(ignoreTime.hour() * 3600 + ignoreTime.minute() * 60));
+
+        // Convert to sqlite's datetime format.
+        QString strDateTime = timeCurrent.toString("yyyy-MM-dd hh:mm:ss");
+
+        strQuery += QString(" AND (" AUTODJCRATES_TABLE
+                "." AUTODJCRATESTABLE_LASTPLAYED " IS NULL OR " AUTODJCRATES_TABLE
+                "." AUTODJCRATESTABLE_LASTPLAYED " = '' OR " AUTODJCRATES_TABLE
+                "." AUTODJCRATESTABLE_LASTPLAYED " < :lastplayed)");
+        strQuery += QString(" ORDER BY %1" AUTODJCRATESTABLE_LASTPLAYED
+                " LIMIT 1 OFFSET :offset")
+                            .arg(strTimesPlayed);
+
+        oQuery.prepare(strQuery);
+        oQuery.bindValue(":crate_id", crateId.toVariant());
+        oQuery.bindValue(":lastplayed", strDateTime);
+        oQuery.bindValue(":offset", randomOffset);
+    } else {
+        strQuery += QString(" ORDER BY %1" AUTODJCRATESTABLE_LASTPLAYED
+                " LIMIT 1 OFFSET :offset")
+                            .arg(strTimesPlayed);
+
+        oQuery.prepare(strQuery);
+        oQuery.bindValue(":crate_id", crateId.toVariant());
+        oQuery.bindValue(":offset", randomOffset);
+    }
+
+    if (!oQuery.exec()) {
+        LOG_FAILED_QUERY(oQuery);
+        return TrackId();
+    }
+    if (oQuery.next()) {
+        return TrackId(oQuery.value(0));
+    }
+    return TrackId();
+}
 
 // Signaled by the track DAO when a track's information is updated.
 void AutoDJCratesDAO::slotTrackDirty(TrackId trackId) {

@@ -593,4 +593,12 @@ reapplying those migrations.
       ALTER TABLE library ADD COLUMN tuning_frequency_hz FLOAT DEFAULT 0.0;
     </sql>
   </revision>
+  <revision version="41" min_compatible="3">
+    <description>
+      Add per-crate weight for weighted Auto DJ random selection.
+    </description>
+    <sql>
+      ALTER TABLE crates ADD COLUMN autodj_weight INTEGER NOT NULL DEFAULT 10;
+    </sql>
+  </revision>
 </schema>

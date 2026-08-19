@@ -1,7 +1,9 @@
 #pragma once
 
 #include <QObject>
+#include <QPair>
 #include <QSqlDatabase>
+#include <QVector>
 
 #include "library/trackset/crate/crateid.h"
 #include "preferences/usersettings.h"
@@ -98,6 +100,11 @@ class AutoDJCratesDAO : public QObject {
     void playerInfoTrackUnloaded(const QString& group, TrackId trackId);
     void updateAutoDjCrate(CrateId crateId);
     void deleteAutoDjCrate(CrateId crateId);
+
+    // Two-stage weighted selection helpers
+    CrateId selectCrateByWeight(const QVector<QPair<CrateId, int>>& candidates);
+    int countActiveTracksForCrate(CrateId crateId);
+    TrackId getRandomTrackFromCrate(CrateId crateId, int activeCount);
 
     // The auto-DJ playlist's ID.
     const int m_iAutoDjPlaylistId;
