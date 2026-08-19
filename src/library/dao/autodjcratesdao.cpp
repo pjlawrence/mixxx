@@ -570,7 +570,7 @@ TrackId AutoDJCratesDAO::getRandomTrackId() {
     // Build the candidates vector: (CrateId, weight) pairs.
     QVector<QPair<CrateId, int>> candidates;
     while (oQuery.next()) {
-        CrateId crateId(oQuery.value(0).toInt());
+        CrateId crateId(oQuery.value(0));
         int weight = oQuery.value(1).toInt();
         candidates.append(qMakePair(crateId, weight));
     }
@@ -798,10 +798,17 @@ int AutoDJCratesDAO::countActiveTracksForCrate(CrateId crateId) {
         QDateTime timeCurrent = QDateTime::currentDateTimeUtc();
 
         // Subtract the configured ignore time.
-        QTime ignoreTime = QTime::fromString(
-                m_pConfig->getValue(
-                        ConfigKey("[Auto DJ]", "IgnoreTime"), "23:59"),
-                "hh:mm");
+        // Try "hh:mm:ss" first (QTime::toString() default), fall back to "hh:mm"
+        // for backward compatibility with older config values.
+        QString ignoreTimeStr = m_pConfig->getValue(
+                ConfigKey("[Auto DJ]", "IgnoreTime"), "23:59");
+        QTime ignoreTime = QTime::fromString(ignoreTimeStr, "hh:mm:ss");
+        if (!ignoreTime.isValid()) {
+            ignoreTime = QTime::fromString(ignoreTimeStr, "hh:mm");
+        }
+        if (!ignoreTime.isValid()) {
+            ignoreTime = QTime(23, 59); // fallback default
+        }
         timeCurrent = timeCurrent.addSecs(
                 -(ignoreTime.hour() * 3600 + ignoreTime.minute() * 60));
 
@@ -904,10 +911,17 @@ TrackId AutoDJCratesDAO::getRandomTrackFromCrate(CrateId crateId, int activeCoun
         QDateTime timeCurrent = QDateTime::currentDateTimeUtc();
 
         // Subtract the configured ignore time.
-        QTime ignoreTime = QTime::fromString(
-                m_pConfig->getValue(
-                        ConfigKey("[Auto DJ]", "IgnoreTime"), "23:59"),
-                "hh:mm");
+        // Try "hh:mm:ss" first (QTime::toString() default), fall back to "hh:mm"
+        // for backward compatibility with older config values.
+        QString ignoreTimeStr = m_pConfig->getValue(
+                ConfigKey("[Auto DJ]", "IgnoreTime"), "23:59");
+        QTime ignoreTime = QTime::fromString(ignoreTimeStr, "hh:mm:ss");
+        if (!ignoreTime.isValid()) {
+            ignoreTime = QTime::fromString(ignoreTimeStr, "hh:mm");
+        }
+        if (!ignoreTime.isValid()) {
+            ignoreTime = QTime(23, 59); // fallback default
+        }
         timeCurrent = timeCurrent.addSecs(
                 -(ignoreTime.hour() * 3600 + ignoreTime.minute() * 60));
 
