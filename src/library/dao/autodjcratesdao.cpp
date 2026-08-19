@@ -816,8 +816,11 @@ int AutoDJCratesDAO::countActiveTracksForCrate(CrateId crateId) {
         QString strDateTime = timeCurrent.toString("yyyy-MM-dd hh:mm:ss");
 
         // Add lastplayed filter: only count tracks played before the threshold.
-        strQuery += QString(" AND " AUTODJCRATES_TABLE
-                "." AUTODJCRATESTABLE_LASTPLAYED " < :lastplayed");
+        // Include tracks that have never been played (NULL or empty lastplayed).
+        strQuery += QString(" AND (" AUTODJCRATES_TABLE
+                "." AUTODJCRATESTABLE_LASTPLAYED " IS NULL OR " AUTODJCRATES_TABLE
+                "." AUTODJCRATESTABLE_LASTPLAYED " = '' OR " AUTODJCRATES_TABLE
+                "." AUTODJCRATESTABLE_LASTPLAYED " < :lastplayed)");
 
         QSqlQuery oQuery(m_database);
         oQuery.prepare(strQuery);
@@ -928,8 +931,10 @@ TrackId AutoDJCratesDAO::getRandomTrackFromCrate(CrateId crateId, int activeCoun
         // Convert to sqlite's datetime format.
         QString strDateTime = timeCurrent.toString("yyyy-MM-dd hh:mm:ss");
 
-        strQuery += QString(" AND " AUTODJCRATES_TABLE
-                "." AUTODJCRATESTABLE_LASTPLAYED " < :lastplayed");
+        strQuery += QString(" AND (" AUTODJCRATES_TABLE
+                "." AUTODJCRATESTABLE_LASTPLAYED " IS NULL OR " AUTODJCRATES_TABLE
+                "." AUTODJCRATESTABLE_LASTPLAYED " = '' OR " AUTODJCRATES_TABLE
+                "." AUTODJCRATESTABLE_LASTPLAYED " < :lastplayed)");
         strQuery += QString(" ORDER BY %1" AUTODJCRATESTABLE_LASTPLAYED
                 " LIMIT 1 OFFSET :offset")
                             .arg(strTimesPlayed);
