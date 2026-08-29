@@ -3,6 +3,7 @@
 #include "library/library_prefs.h"
 #include "moc_javascriptplayerproxy.cpp"
 #include "track/track.h"
+#include "track/trackid.h"
 
 JavascriptPlayerProxy::JavascriptPlayerProxy(BaseTrackPlayer* pTrackPlayer, QObject* parent)
         : QObject(parent),
@@ -25,6 +26,8 @@ JavascriptPlayerProxy::JavascriptPlayerProxy(BaseTrackPlayer* pTrackPlayer, QObj
             this,
             [this]() {
                 disconnectTrack();
+                emit trackLocationChanged(QString());
+                emit trackIdChanged(0);
                 emit trackUnloaded();
             });
 }
@@ -32,6 +35,8 @@ JavascriptPlayerProxy::JavascriptPlayerProxy(BaseTrackPlayer* pTrackPlayer, QObj
 void JavascriptPlayerProxy::slotTrackLoaded(TrackPointer pTrack) {
     m_pCurrentTrack = pTrack;
     if (pTrack == nullptr) {
+        emit trackLocationChanged(QString());
+        emit trackIdChanged(0);
         emit trackUnloaded();
         return;
     }
@@ -98,6 +103,8 @@ void JavascriptPlayerProxy::slotTrackLoaded(TrackPointer pTrack) {
     emit trackNumberChanged(m_pCurrentTrack->getTrackNumber());
     emit trackTotalChanged(m_pCurrentTrack->getTrackTotal());
     emit keyChanged(getKeyText());
+    emit trackLocationChanged(getTrackLocation());
+    emit trackIdChanged(getTrackId());
 }
 
 void JavascriptPlayerProxy::slotLoadingTrack(TrackPointer pNewTrack, TrackPointer pOldTrack) {
@@ -145,3 +152,23 @@ PROPERTY_IMPL_GETTER(JavascriptPlayerProxy, QString, grouping, getGrouping)
 PROPERTY_IMPL_GETTER(JavascriptPlayerProxy, QString, year, getYear)
 PROPERTY_IMPL_GETTER(JavascriptPlayerProxy, QString, trackNumber, getTrackNumber)
 PROPERTY_IMPL_GETTER(JavascriptPlayerProxy, QString, trackTotal, getTrackTotal)
+
+QString JavascriptPlayerProxy::getTrackLocation() const {
+    const TrackPointer pTrack = m_pCurrentTrack;
+    if (pTrack == nullptr) {
+        return QString();
+    }
+    return pTrack->getLocation();
+}
+
+int JavascriptPlayerProxy::getTrackId() const {
+    const TrackPointer pTrack = m_pCurrentTrack;
+    if (pTrack == nullptr) {
+        return 0;
+    }
+    const TrackId id = pTrack->getId();
+    if (!id.isValid()) {
+        return 0;
+    }
+    return id.toVariant().toInt();
+}
