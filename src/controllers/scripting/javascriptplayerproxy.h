@@ -25,6 +25,12 @@ class JavascriptPlayerProxy : public QObject {
     Q_PROPERTY(QString trackNumber READ getTrackNumber NOTIFY trackNumberChanged)
     Q_PROPERTY(QString trackTotal READ getTrackTotal NOTIFY trackTotalChanged)
     Q_PROPERTY(QString key READ getKeyText NOTIFY keyChanged)
+    // Read-only exposure of the loaded track's absolute file location and its
+    // library id, for controller scripts that need to identify the exact loaded
+    // file (e.g. the Peh feed forwarder). These are derived from the Track and
+    // are never writable from scripts.
+    Q_PROPERTY(QString trackLocation READ getTrackLocation NOTIFY trackLocationChanged)
+    Q_PROPERTY(int trackId READ getTrackId NOTIFY trackIdChanged)
 
   public:
     explicit JavascriptPlayerProxy(BaseTrackPlayer* pTrackPlayer, QObject* parent);
@@ -40,6 +46,8 @@ class JavascriptPlayerProxy : public QObject {
     QString getTrackNumber() const;
     QString getTrackTotal() const;
     QString getKeyText() const;
+    QString getTrackLocation() const;
+    int getTrackId() const;
 
   public slots:
     void slotTrackLoaded(TrackPointer pTrack);
@@ -58,6 +66,8 @@ class JavascriptPlayerProxy : public QObject {
     void trackNumberChanged(const QString& newTrackNumber);
     void trackTotalChanged(const QString& newTrackTotal);
     void keyChanged(const QString& newKey);
+    void trackLocationChanged(const QString& newTrackLocation);
+    void trackIdChanged(int newTrackId);
 
   private slots:
     // Track::keyChanged has no arguments,
