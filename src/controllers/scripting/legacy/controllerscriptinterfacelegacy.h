@@ -114,6 +114,15 @@ class ControllerScriptInterfaceLegacy : public QObject {
                     targetCharset,
             const QString& value);
 
+    // [AI-GENERATED — this comment was written autonomously by an AI agent and
+    // reviewed by the human contributor before committing.]
+    // Read-only accessor exposing the launch-environment session id to controller
+    // scripts. Returns qEnvironmentVariable("PEH_MIXXX_SESSION"), or an empty
+    // QString when the variable is unset. Read-only: exposes no write path and no
+    // environment variable other than PEH_MIXXX_SESSION.
+    // [END AI-GENERATED]
+    Q_INVOKABLE QString getSessionId();
+
     bool removeScriptConnection(const ScriptConnection& conn);
     /// Execute a ScriptConnection's JS callback
     void triggerScriptConnection(const ScriptConnection& conn);

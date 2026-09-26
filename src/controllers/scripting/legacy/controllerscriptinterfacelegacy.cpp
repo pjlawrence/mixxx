@@ -1,6 +1,7 @@
 #include "controllerscriptinterfacelegacy.h"
 
 #include <QStringEncoder>
+#include <QtGlobal>
 #include <gsl/pointers>
 
 #include "control/controlobject.h"
@@ -1167,4 +1168,14 @@ QByteArray ControllerScriptInterfaceLegacy::convertCharsetInternal(
         return QByteArray();
     }
     return fromUtf16(value);
+}
+
+// [AI-GENERATED — this method body was written autonomously by an AI agent and
+// reviewed by the human contributor before committing.]
+// Read-only accessor: returns the launch-environment session id from
+// PEH_MIXXX_SESSION, or an empty QString when the variable is unset. It reads a
+// single, fixed environment variable and exposes no write path.
+// [END AI-GENERATED]
+QString ControllerScriptInterfaceLegacy::getSessionId() {
+    return qEnvironmentVariable("PEH_MIXXX_SESSION");
 }
